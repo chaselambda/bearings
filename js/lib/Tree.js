@@ -347,36 +347,77 @@ Tree.unindent = function(tree) {
 	
 	// Check if we have multiple selected nodes
 	if (root.selectedNodes && root.selectedNodes.length > 0) {
-		// Convert UUIDs to node references and sort them by their position
+		// Step 1: Build a node hierarchy map to track parent-child relationships
+		var nodeMap = {};
+		var topLevelSelectedNodes = [];
 		var selectedNodes = [];
+		
+		// First pass: build the mapping of nodes and identify which nodes are in the selection
 		for (var i = 0; i < root.selectedNodes.length; i++) {
-			selectedNodes.push(Tree.findFromUUID(tree, root.selectedNodes[i]));
+			var node = Tree.findFromUUID(tree, root.selectedNodes[i]);
+			selectedNodes.push(node);
+			nodeMap[node.uuid] = { 
+				node: node, 
+				isTopLevel: true, // Assume top level until we find it's a child of another selected node
+				children: []
+			};
 		}
 		
-		// Process each selected node
+		// Second pass: establish parent-child relationships within selected nodes
 		for (var i = 0; i < selectedNodes.length; i++) {
 			var node = selectedNodes[i];
+			// Check if this node's parent is also selected
+			var parentInSelection = false;
+			
+			for (var j = 0; j < selectedNodes.length; j++) {
+				var potentialParent = selectedNodes[j];
+				if (potentialParent !== node && node.parent === potentialParent) {
+					// This node has a parent in the selection
+					nodeMap[node.uuid].isTopLevel = false;
+					nodeMap[potentialParent.uuid].children.push(node);
+					parentInSelection = true;
+					break;
+				}
+			}
+			
+			if (!parentInSelection && nodeMap[node.uuid].isTopLevel) {
+				topLevelSelectedNodes.push(node);
+			}
+		}
+		
+		// Step 2: Process only the top-level selected nodes
+		// Sort by parent/position to maintain order
+		topLevelSelectedNodes.sort(function(a, b) {
+			if (a.parent !== b.parent) {
+				return 0; // Different parents, keep original order
+			}
+			return Tree.findChildNum(a) - Tree.findChildNum(b);
+		});
+		
+		// Process each top-level selected node
+		for (var i = 0; i < topLevelSelectedNodes.length; i++) {
+			var topNode = topLevelSelectedNodes[i];
 			
 			// Skip if it's a root-level node or the parent is the zoom point
-			if (!node.parent.parent || node === root.zoom || node.parent === root.zoom) {
+			if (!topNode.parent.parent || topNode === root.zoom || topNode.parent === root.zoom) {
 				continue;
 			}
 			
-			var childNum = Tree.findChildNum(node);
-			var parentChildNum = Tree.findChildNum(node.parent);
-			var newParent = node.parent.parent;
+			var childNum = Tree.findChildNum(topNode);
+			var parentChildNum = Tree.findChildNum(topNode.parent);
+			var newParent = topNode.parent.parent;
 			
-			// Move to the appropriate position under the grandparent
-			newParent.childNodes.splice(parentChildNum + 1, 0, node);
+			// Move the node to the appropriate position under the grandparent (with all its children)
+			newParent.childNodes.splice(parentChildNum + 1, 0, topNode);
 			
-			// Remove from the current parent
-			node.parent.childNodes.splice(childNum, 1);
+			// Remove from the original parent
+			topNode.parent.childNodes.splice(childNum, 1);
 			
 			// Update parent reference
-			node.parent = newParent;
+			topNode.parent = newParent;
 			
 			// Mark for rendering
-			Tree.addDiff(node);
+			Tree.addDiff(topNode);
 			Tree.addDiff(newParent);
 		}
 		
