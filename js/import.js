@@ -4,14 +4,19 @@ var opmlToJSON = require('opml-to-json');
 var multiline = require('multiline');
 var Tree = require('./lib/Tree');
 var Convert = require('./lib/Convert');
-var Parse = require('parse').Parse;
 var config = require('./config');
 var ImportUtils = require('./lib/ImportUtils');
+var FakeParseTree = require('./lib/FakeParseTree');
 
-Parse.initialize(config.parse_app_id, config.parse_js_key);
+var parseTree;
+var query;
 
-var First = Parse.Object.extend('first');
-var query = new Parse.Query(First);
+if (config.use_parse) {
+	var Parse = require('parse').Parse;
+	Parse.initialize(config.parse_app_id, config.parse_js_key);
+	var First = Parse.Object.extend('first');
+	query = new Parse.Query(First);
+}
 
 var SubmitButton = React.createClass({
 	getInitialState: function() {
@@ -44,18 +49,27 @@ var SubmitButton = React.createClass({
 	},
 	handleHtmlClick: function() {
 		var tree = Tree.makeTree(Convert.htmlToTree(this.state.value));
-		console.log('go get', config.parse_id);
-		query.get(config.parse_id, {
-			success: function(parseTree) {
-				console.log('Saving tree', Tree.toString(tree));
-				parseTree.set('tree', Tree.toString(tree));
-				parseTree.save();
-			},
-			error: function(obj, error) {
-				console.log(error);
-				throw 'Error loading tree' + obj + error;
-			}
-		});
+		console.log('Importing HTML tree');
+		
+		if (config.use_parse) {
+			console.log('Saving to Parse', config.parse_id);
+			query.get(config.parse_id, {
+				success: function(parseTree) {
+					console.log('Saving tree', Tree.toString(tree));
+					parseTree.set('tree', Tree.toString(tree));
+					parseTree.save();
+				},
+				error: function(obj, error) {
+					console.log(error);
+					throw 'Error loading tree' + obj + error;
+				}
+			});
+		} else {
+			// Save to localStorage
+			console.log('Saving to localStorage');
+			localStorage.setItem('bearings_tree', Tree.toString(tree));
+			alert('Tree imported successfully to localStorage!');
+		}
 	},
 	handleChange: function(event) {
 		this.setState({ value: event.target.value });
@@ -108,18 +122,35 @@ function printAll(objs) {
 }
 
 function submitOpml(opml) {
-	console.log('submit', opml);
-	query.get(config.parse_id, {
-		success: function(parseTree) {
-			opmlToJSON(opml, function(error, json) {
-				var tree = Tree.makeTree(ImportUtils.workflowyToWorkclone(json));
-				console.log('tree', Tree.toString(tree));
-				parseTree.set('tree', Tree.toString(tree));
-				parseTree.save();
-			});
-		},
-		error: function(obj, error) {
-			throw 'Error loading tree' + obj + error;
-		}
-	});
+	console.log('submit', opml, 'useparse', config.use_parse);
+	
+	if (config.use_parse) {
+		query.get(config.parse_id, {
+			success: function(parseTree) {
+				opmlToJSON(opml, function(error, json) {
+					var tree = Tree.makeTree(ImportUtils.workflowyToWorkclone(json));
+					console.log('tree', Tree.toString(tree));
+					parseTree.set('tree', Tree.toString(tree));
+					parseTree.save();
+				});
+			},
+			error: function(obj, error) {
+				throw 'Error loading tree' + obj + error;
+			}
+		});
+	} else {
+		// Save to localStorage
+		opmlToJSON(opml, function(error, json) {
+			if (error) {
+				console.error('Error parsing OPML:', error);
+				alert('Error parsing OPML: ' + error);
+				return;
+			}
+			
+			var tree = Tree.makeTree(ImportUtils.workflowyToWorkclone(json));
+			console.log('Saving tree to localStorage', Tree.toString(tree));
+			localStorage.setItem('bearings_tree', Tree.toString(tree));
+			alert('Tree imported successfully to localStorage!');
+		});
+	}
 }
