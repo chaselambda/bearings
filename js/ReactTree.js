@@ -439,10 +439,12 @@ ReactTree.TreeNode = React.createClass({
 			} else {
 				Tree.indent(globalTree);
 			}
+			globalDiffUncommitted = true;
 			renderAll();
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.SPACE && e.ctrlKey) {
 			Tree.collapseCurrent(globalTree);
+			globalDiffUncommitted = true;
 			renderAll();
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.Z && (e.ctrlKey || e.metaKey)) {
@@ -664,14 +666,22 @@ ReactTree.startRender = function(parseTree) {
 			globalUndoRing.addPending(newTree);
 			globalUndoRing.commit();
 		}
+		
+		// Auto-save to localStorage
+		if (!globalDataSaved) {
+			console.log('Saving to localStorage');
+			localStorage.setItem('bearings_tree', Tree.toString(globalTree));
+			globalDataSaved = true;
+			renderAllNoUndo();
+		}
 	}, 2000);
 };
 
 function renderAll() {
-	// if (globalDiffUncommitted) {
-	// 	// TODO this needs to get set to false when running undo...
-	// 	globalDataSaved = false;
-	// }
+	if (globalDiffUncommitted) {
+		// TODO this needs to get set to false when running undo...
+		globalDataSaved = false;
+	}
 	doRender(globalTree);
 }
 

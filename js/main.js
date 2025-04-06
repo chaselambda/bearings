@@ -18,7 +18,23 @@ if (config.use_parse) {
 		}
 	});
 } else {
-	ImportUtils.opmlToTree(ImportUtils.sampleOpml, function(tree) {
-		ReactTree.startRender(new FakeParseTree(Tree.toString(tree)));
-	});
+	// Try to load from localStorage first
+	var savedData = localStorage.getItem('bearings_tree');
+	if (savedData) {
+		try {
+			var tree = Tree.fromString(savedData);
+			ReactTree.startRender(new FakeParseTree(Tree.toString(tree)));
+		} catch (e) {
+			console.error('Failed to load saved data', e);
+			// Fall back to sample data
+			ImportUtils.opmlToTree(ImportUtils.sampleOpml, function(tree) {
+				ReactTree.startRender(new FakeParseTree(Tree.toString(tree)));
+			});
+		}
+	} else {
+		// Load sample data if no saved data exists
+		ImportUtils.opmlToTree(ImportUtils.sampleOpml, function(tree) {
+			ReactTree.startRender(new FakeParseTree(Tree.toString(tree)));
+		});
+	}
 }
