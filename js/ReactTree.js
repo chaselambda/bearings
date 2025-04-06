@@ -202,6 +202,12 @@ ReactTree.TreeNode = React.createClass({
 			return;
 		}
 		var currentNode = Tree.findFromUUID(globalTree, this.props.node.uuid);
+		
+		// Clear multi-selection when clicking without shift key
+		if (!event.shiftKey) {
+			Tree.clearSelection(globalTree);
+		}
+		
 		globalTree.selected = currentNode.uuid;
 		if (event.type === 'focus') {
 			// clicking on the div, not the actual text. Also always fired when switching focus
@@ -211,6 +217,12 @@ ReactTree.TreeNode = React.createClass({
 			globalTree.caretLoc = Cursor.getCaretCharacterOffsetWithin(
 				this.refs.input.getDOMNode()
 			);
+		}
+		
+		// If clicking with shift, add this node to the selection
+		if (event.shiftKey) {
+			Tree.addToSelection(globalTree, currentNode.uuid);
+			renderAll();
 		}
 	},
 
@@ -271,11 +283,35 @@ ReactTree.TreeNode = React.createClass({
 		} else if (e.keyCode === KEYS.UP) {
 			if (e.shiftKey && e.ctrlKey) {
 				Tree.shiftUp(globalTree);
+				renderAll();
+				e.preventDefault();
+			} else if (e.shiftKey) {
+				// Handle multi-select with shift+up
+				var selected = Tree.findSelected(globalTree);
+				var previous = Tree.findPreviousNode(selected);
+				
+				if (previous) {
+					// If this is the first shift selection, add the current node to selection
+					if (globalTree.selectedNodes.length === 0) {
+						Tree.addToSelection(globalTree, selected.uuid);
+					}
+					
+					// Add the previous node to selection
+					Tree.addToSelection(globalTree, previous.uuid);
+					
+					// Update the primary selection
+					globalTree.selected = previous.uuid;
+					globalTree.caretLoc = 0;
+					renderAll();
+				}
+				e.preventDefault();
 			} else {
+				// Clear multi-selection when navigating without shift
+				Tree.clearSelection(globalTree);
 				Tree.selectPreviousNode(globalTree);
 				globalTree.caretLoc = 0;
+				renderAll();
 			}
-			renderAll();
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.RIGHT) {
 			if (e.ctrlKey) {
@@ -288,6 +324,8 @@ ReactTree.TreeNode = React.createClass({
 					this.refs.input.getDOMNode()
 				);
 				if (newCaretLoc === this.refs.input.getDOMNode().textContent.length) {
+					// Clear multi-selection when navigating without shift
+					Tree.clearSelection(globalTree);
 					Tree.selectNextNode(globalTree);
 					globalTree.caretLoc = 0;
 					renderAll();
@@ -299,12 +337,36 @@ ReactTree.TreeNode = React.createClass({
 		} else if (e.keyCode === KEYS.DOWN) {
 			if (e.shiftKey && e.ctrlKey) {
 				Tree.shiftDown(globalTree);
+				renderAll();
+				e.preventDefault();
+			} else if (e.shiftKey) {
+				// Handle multi-select with shift+down
+				var selected = Tree.findSelected(globalTree);
+				var next = Tree.findNextNode(selected);
+				
+				if (next) {
+					// If this is the first shift selection, add the current node to selection
+					if (globalTree.selectedNodes.length === 0) {
+						Tree.addToSelection(globalTree, selected.uuid);
+					}
+					
+					// Add the next node to selection
+					Tree.addToSelection(globalTree, next.uuid);
+					
+					// Update the primary selection
+					globalTree.selected = next.uuid;
+					globalTree.caretLoc = 0;
+					renderAll();
+				}
+				e.preventDefault();
 			} else {
+				// Clear multi-selection when navigating without shift
+				Tree.clearSelection(globalTree);
 				console.log('down');
 				Tree.selectNextNode(globalTree);
 				globalTree.caretLoc = 0;
+				renderAll();
 			}
-			renderAll();
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.ENTER && e.ctrlKey) {
 			console.log('complete current');
@@ -322,8 +384,16 @@ ReactTree.TreeNode = React.createClass({
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.BACKSPACE) {
 			if (e.ctrlKey && e.shiftKey) {
+				// Delete selected nodes - either multi-selection or current node
 				Tree.deleteSelected(globalTree);
 				renderAll();
+				e.preventDefault();
+			} else if (globalTree.selectedNodes && globalTree.selectedNodes.length > 0) {
+				// If there are multiple selected nodes and regular backspace is pressed
+				if (confirm("Delete all selected items?")) {
+					Tree.deleteSelected(globalTree);
+					renderAll();
+				}
 				e.preventDefault();
 			} else {
 				globalTree.caretLoc = Cursor.getCaretCharacterOffsetWithin(
@@ -434,6 +504,12 @@ ReactTree.TreeNode = React.createClass({
 
 		if (this.props.node.completed) {
 			contentClassName += ' completed';
+		}
+		
+		// Add highlighting for multi-selected nodes
+		var root = Tree.getRoot(globalTree);
+		if (root.selectedNodes && root.selectedNodes.includes(this.props.node.uuid)) {
+			contentClassName += ' multi-selected';
 		}
 
 		var plus;

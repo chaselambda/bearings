@@ -194,6 +194,7 @@ Tree.makeNode = function(args) {
 	Tree.setIfReal(ret, args, 'uuidMap');
 	Tree.setIfReal(ret, args, 'zoom');
 	Tree.setIfReal(ret, args, 'diff');
+	Tree.setIfReal(ret, args, 'selectedNodes', []);
 	return ret;
 };
 
@@ -238,6 +239,7 @@ Tree.cloneGeneral = function(tree, parent, options) {
 			uuidMap: options.noparent ? undefined : {},
 			completedHidden: tree.completedHidden,
 			diff: options.noparent ? undefined : {},
+			selectedNodes: options.nomouse ? undefined : (tree.selectedNodes || []),
 		},
 		{ clean: options.clean }
 	);
@@ -253,7 +255,79 @@ Tree.cloneGeneral = function(tree, parent, options) {
 };
 
 Tree.indent = function(tree) {
+	var root = Tree.getRoot(tree);
 	var selected = Tree.findSelected(tree);
+	
+	// Check if we have multiple selected nodes
+	if (root.selectedNodes && root.selectedNodes.length > 0) {
+		// Group the selected nodes by parent
+		var nodesByParent = {};
+		for (var i = 0; i < root.selectedNodes.length; i++) {
+			var nodeUuid = root.selectedNodes[i];
+			var node = Tree.findFromUUID(tree, nodeUuid);
+			var parentUuid = node.parent.uuid;
+			
+			if (!nodesByParent[parentUuid]) {
+				nodesByParent[parentUuid] = [];
+			}
+			nodesByParent[parentUuid].push(node);
+		}
+		
+		// Process each parent's group of selected nodes
+		for (var parentUuid in nodesByParent) {
+			var nodesInParent = nodesByParent[parentUuid];
+			if (nodesInParent.length === 0) continue;
+			
+			// Sort nodes by index, lowest first
+			nodesInParent.sort(function(a, b) {
+				return Tree.findChildNum(a) - Tree.findChildNum(b);
+			});
+			
+			// Find the first selected node in this parent
+			var firstSelectedNode = nodesInParent[0];
+			var firstSelectedIndex = Tree.findChildNum(firstSelectedNode);
+			
+			// Skip if it's the first child (can't indent)
+			if (firstSelectedIndex === 0) {
+				continue;
+			}
+			
+			// Use the node right before the first selected node as the new parent for all selected nodes
+			var newParent = firstSelectedNode.parent.childNodes[firstSelectedIndex - 1];
+			delete newParent.collapsed; // Expand the parent to show the indented nodes
+			
+			// Process nodes in reverse order to avoid index shifting issues
+			nodesInParent.sort(function(a, b) {
+				return Tree.findChildNum(b) - Tree.findChildNum(a);
+			});
+			
+			for (var i = 0; i < nodesInParent.length; i++) {
+				var node = nodesInParent[i];
+				var childNum = Tree.findChildNum(node);
+				
+				// Remove from the original parent
+				node.parent.childNodes.splice(childNum, 1);
+				
+				// Add to the new parent's children
+				newParent.childNodes.push(node);
+				
+				// Update parent reference
+				node.parent = newParent;
+				
+				// Mark for rendering
+				Tree.addDiff(node);
+			}
+			
+			// Mark the new parent for rendering
+			Tree.addDiff(newParent);
+		}
+		
+		// Mark everything for rendering to be safe
+		Tree.addAllDiff(root);
+		return;
+	}
+	
+	// Original single-node indent behavior
 	var childNum = Tree.findChildNum(selected);
 	if (childNum == 0) {
 		return;
@@ -268,8 +342,50 @@ Tree.indent = function(tree) {
 };
 
 Tree.unindent = function(tree) {
-	var selected = Tree.findSelected(tree);
 	var root = Tree.getRoot(tree);
+	var selected = Tree.findSelected(tree);
+	
+	// Check if we have multiple selected nodes
+	if (root.selectedNodes && root.selectedNodes.length > 0) {
+		// Convert UUIDs to node references and sort them by their position
+		var selectedNodes = [];
+		for (var i = 0; i < root.selectedNodes.length; i++) {
+			selectedNodes.push(Tree.findFromUUID(tree, root.selectedNodes[i]));
+		}
+		
+		// Process each selected node
+		for (var i = 0; i < selectedNodes.length; i++) {
+			var node = selectedNodes[i];
+			
+			// Skip if it's a root-level node or the parent is the zoom point
+			if (!node.parent.parent || node === root.zoom || node.parent === root.zoom) {
+				continue;
+			}
+			
+			var childNum = Tree.findChildNum(node);
+			var parentChildNum = Tree.findChildNum(node.parent);
+			var newParent = node.parent.parent;
+			
+			// Move to the appropriate position under the grandparent
+			newParent.childNodes.splice(parentChildNum + 1, 0, node);
+			
+			// Remove from the current parent
+			node.parent.childNodes.splice(childNum, 1);
+			
+			// Update parent reference
+			node.parent = newParent;
+			
+			// Mark for rendering
+			Tree.addDiff(node);
+			Tree.addDiff(newParent);
+		}
+		
+		// Mark everything for rendering to be safe
+		Tree.addAllDiff(root);
+		return;
+	}
+	
+	// Original single-node unindent behavior
 	if (!selected.parent.parent) {
 		return;
 	}
@@ -380,10 +496,84 @@ Tree.zoomOutOne = function(tree) {
 };
 
 Tree.deleteSelected = function(tree) {
-	// TODO think if this is the root..
+	var root = Tree.getRoot(tree);
+	
+	// Handle multiple selected nodes
+	if (root.selectedNodes && root.selectedNodes.length > 0) {
+		// Convert UUIDs to node references
+		var selectedNodes = [];
+		for (var i = 0; i < root.selectedNodes.length; i++) {
+			selectedNodes.push(Tree.findFromUUID(tree, root.selectedNodes[i]));
+		}
+		
+		// Sort the selected nodes in reverse order by their position
+		// to avoid index shifting problems when removing nodes
+		selectedNodes.sort(function(a, b) {
+			var aParent = a.parent;
+			var bParent = b.parent;
+			
+			// If they have the same parent, sort by child index
+			if (aParent === bParent) {
+				return Tree.findChildNum(b) - Tree.findChildNum(a);
+			}
+			
+			// Otherwise, they can't be sorted reliably, so maintain original order
+			return 0;
+		});
+		
+		// Get a viable next selection node (the node before the first selected node)
+		var nextSelection = Tree.findPreviousNode(selectedNodes[selectedNodes.length - 1]);
+		
+		if (!nextSelection) {
+			// If no previous node, try to find a node after the last selected node
+			var lastNode = selectedNodes[0];
+			nextSelection = Tree.findNextNodeRec(lastNode, root.zoom);
+			
+			// If still no selection, use first node of root
+			if (!nextSelection && root.childNodes.length > 0) {
+				for (var i = 0; i < root.childNodes.length; i++) {
+					if (!selectedNodes.includes(root.childNodes[i])) {
+						nextSelection = root.childNodes[i];
+						break;
+					}
+				}
+			}
+		}
+		
+		// Delete each selected node
+		for (var i = 0; i < selectedNodes.length; i++) {
+			var node = selectedNodes[i];
+			
+			// Skip the root node or last remaining node
+			if (node === root.zoom || (node.parent.title === 'special_root_title' && node.parent.childNodes.length <= 1)) {
+				continue;
+			}
+			
+			var childNum = Tree.findChildNum(node);
+			node.parent.childNodes.splice(childNum, 1);
+			Tree.addDiff(node.parent);
+		}
+		
+		// Update selection to the next node
+		if (nextSelection) {
+			root.selected = nextSelection.uuid;
+			root.caretLoc = nextSelection.title.length;
+			Tree.addDiff(nextSelection);
+		} else {
+			// If no suitable next selection was found, clear selection
+			root.selected = null;
+		}
+		
+		// Clear the multi-selection
+		root.selectedNodes = [];
+		Tree.addAllDiff(root);
+		return;
+	}
+	
+	// Original single-node deletion behavior
 	var selected = Tree.findSelected(tree);
 	var nextSelection = Tree.findPreviousNode(selected);
-	var root = Tree.getRoot(tree);
+	
 	if (!nextSelection) {
 		console.assert(selected.parent.title === 'special_root_title');
 		if (selected.parent.childNodes.length > 1) {
@@ -583,6 +773,7 @@ Tree.makeTree = function(nodes) {
 	ret.zoomUUID = ret.uuid;
 	ret.diff = {};
 	ret.completedHidden = true;
+	ret.selectedNodes = [];
 	//ret.selected = ret.childNodes[0].uuid; // TODO check if needed?
 	return ret;
 };
@@ -672,6 +863,97 @@ Tree.setCompletedHidden = function(tree, isHidden) {
 Tree.isCompletedHidden = function(tree) {
 	var root = Tree.getRoot(tree);
 	return root.completedHidden;
+};
+
+// Selection management functions
+Tree.isNodeSelected = function(tree, uuid) {
+	var root = Tree.getRoot(tree);
+	return root.selectedNodes.includes(uuid);
+};
+
+Tree.clearSelection = function(tree) {
+	var root = Tree.getRoot(tree);
+	root.selectedNodes = [];
+	Tree.addAllDiff(root);
+};
+
+Tree.addToSelection = function(tree, uuid) {
+	var root = Tree.getRoot(tree);
+	if (!root.selectedNodes.includes(uuid)) {
+		root.selectedNodes.push(uuid);
+		Tree.addDiff(Tree.findFromUUID(tree, uuid));
+	}
+};
+
+Tree.removeFromSelection = function(tree, uuid) {
+	var root = Tree.getRoot(tree);
+	var index = root.selectedNodes.indexOf(uuid);
+	if (index !== -1) {
+		root.selectedNodes.splice(index, 1);
+		Tree.addDiff(Tree.findFromUUID(tree, uuid));
+	}
+};
+
+Tree.toggleSelection = function(tree, uuid) {
+	if (Tree.isNodeSelected(tree, uuid)) {
+		Tree.removeFromSelection(tree, uuid);
+	} else {
+		Tree.addToSelection(tree, uuid);
+	}
+};
+
+Tree.selectNodesBetween = function(tree, startUuid, endUuid) {
+	var root = Tree.getRoot(tree);
+	var flattenedNodes = Tree.flattenVisibleNodes(root);
+	var startIndex = -1;
+	var endIndex = -1;
+	
+	// Find indices of start and end nodes
+	for (var i = 0; i < flattenedNodes.length; i++) {
+		if (flattenedNodes[i].uuid === startUuid) {
+			startIndex = i;
+		}
+		if (flattenedNodes[i].uuid === endUuid) {
+			endIndex = i;
+		}
+	}
+	
+	// Ensure start is before end
+	if (startIndex > endIndex) {
+		var temp = startIndex;
+		startIndex = endIndex;
+		endIndex = temp;
+	}
+	
+	// Clear existing selection
+	Tree.clearSelection(tree);
+	
+	// Add all nodes between start and end (inclusive) to selection
+	for (var i = startIndex; i <= endIndex; i++) {
+		Tree.addToSelection(tree, flattenedNodes[i].uuid);
+	}
+};
+
+Tree.flattenVisibleNodes = function(tree) {
+	var result = [];
+	var completedHidden = Tree.isCompletedHidden(tree);
+	
+	function traverse(node) {
+		if (completedHidden && node.completed && node !== tree.zoom) {
+			return;
+		}
+		
+		result.push(node);
+		
+		if (node.childNodes && (!node.collapsed || node === tree.zoom)) {
+			for (var i = 0; i < node.childNodes.length; i++) {
+				traverse(node.childNodes[i]);
+			}
+		}
+	}
+	
+	traverse(tree.zoom);
+	return result;
 };
 
 Tree.recSearch = function(tree, query) {
