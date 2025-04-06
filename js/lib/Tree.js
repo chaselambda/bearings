@@ -1023,6 +1023,32 @@ Tree.search = function(tree, query) {
 	return Tree.makeTree();
 };
 
+// Determines if nodeA appears before nodeB in the flattened visible tree
+// Returns true if nodeA is before nodeB, false otherwise
+Tree.isNodeBefore = function(nodeA, nodeB) {
+	if (!nodeA || !nodeB) return false;
+	
+	var root = Tree.getRoot(nodeA);
+	var flattenedNodes = Tree.flattenVisibleNodes(root);
+	
+	var indexA = -1;
+	var indexB = -1;
+	
+	for (var i = 0; i < flattenedNodes.length; i++) {
+		if (flattenedNodes[i].uuid === nodeA.uuid) {
+			indexA = i;
+		}
+		if (flattenedNodes[i].uuid === nodeB.uuid) {
+			indexB = i;
+		}
+		if (indexA !== -1 && indexB !== -1) {
+			break;
+		}
+	}
+	
+	return indexA < indexB;
+};
+
 Tree.yamlObjToTree = function(obj) {
 	var ret = [];
 	for (var i = 0; i < obj.length; i++) {

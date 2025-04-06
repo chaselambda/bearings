@@ -16,6 +16,7 @@ var globalSkipFocus = false; // TODO remove?
 var globalCompletedHidden;
 var globalDiffUncommitted = false;
 var globalSkipNextUndo = false;
+var globalInitialSelectionUuid = null; // Track the starting point of multi-selection
 
 var DataSaved = React.createClass({
 	render: function() {
@@ -206,6 +207,7 @@ ReactTree.TreeNode = React.createClass({
 		// Clear multi-selection when clicking without shift key
 		if (!event.shiftKey) {
 			Tree.clearSelection(globalTree);
+			globalInitialSelectionUuid = null;
 		}
 		
 		globalTree.selected = currentNode.uuid;
@@ -291,16 +293,28 @@ ReactTree.TreeNode = React.createClass({
 				var previous = Tree.findPreviousNode(selected);
 				
 				if (previous) {
-					// If this is the first shift selection, add the current node to selection
+					// If this is the first shift selection, store the initial point
 					if (globalTree.selectedNodes.length === 0) {
+						globalInitialSelectionUuid = selected.uuid;
 						Tree.addToSelection(globalTree, selected.uuid);
 					}
 					
-					// Add the previous node to selection
-					Tree.addToSelection(globalTree, previous.uuid);
+					// Get the initial selection node (if it exists)
+					var initialNode = globalInitialSelectionUuid ? 
+						Tree.findFromUUID(globalTree, globalInitialSelectionUuid) : selected;
+					
+					// If we're moving away from initial selection point or at the initial point
+					if (!initialNode || Tree.isNodeBefore(previous, initialNode) || selected.uuid === initialNode.uuid) {
+						// Add the previous node to selection
+						Tree.addToSelection(globalTree, previous.uuid);
+					} else {
+						// We're moving toward initial selection - remove current node from selection
+						Tree.removeFromSelection(globalTree, selected.uuid);
+					}
 					
 					// Update the primary selection
 					globalTree.selected = previous.uuid;
+					
 					globalTree.caretLoc = 0;
 					renderAll();
 				}
@@ -308,6 +322,7 @@ ReactTree.TreeNode = React.createClass({
 			} else {
 				// Clear multi-selection when navigating without shift
 				Tree.clearSelection(globalTree);
+				globalInitialSelectionUuid = null;
 				Tree.selectPreviousNode(globalTree);
 				globalTree.caretLoc = 0;
 				renderAll();
@@ -345,16 +360,28 @@ ReactTree.TreeNode = React.createClass({
 				var next = Tree.findNextNode(selected);
 				
 				if (next) {
-					// If this is the first shift selection, add the current node to selection
+					// If this is the first shift selection, store the initial point
 					if (globalTree.selectedNodes.length === 0) {
+						globalInitialSelectionUuid = selected.uuid;
 						Tree.addToSelection(globalTree, selected.uuid);
 					}
 					
-					// Add the next node to selection
-					Tree.addToSelection(globalTree, next.uuid);
+					// Get the initial selection node (if it exists)
+					var initialNode = globalInitialSelectionUuid ? 
+						Tree.findFromUUID(globalTree, globalInitialSelectionUuid) : selected;
+					
+					// If we're moving away from initial selection point or at the initial point
+					if (!initialNode || Tree.isNodeBefore(initialNode, next) || selected.uuid === initialNode.uuid) {
+						// Add the next node to selection
+						Tree.addToSelection(globalTree, next.uuid);
+					} else {
+						// We're moving toward initial selection - remove current node from selection
+						Tree.removeFromSelection(globalTree, selected.uuid);
+					}
 					
 					// Update the primary selection
 					globalTree.selected = next.uuid;
+					
 					globalTree.caretLoc = 0;
 					renderAll();
 				}
@@ -362,6 +389,7 @@ ReactTree.TreeNode = React.createClass({
 			} else {
 				// Clear multi-selection when navigating without shift
 				Tree.clearSelection(globalTree);
+				globalInitialSelectionUuid = null;
 				console.log('down');
 				Tree.selectNextNode(globalTree);
 				globalTree.caretLoc = 0;
