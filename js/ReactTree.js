@@ -51,7 +51,7 @@ var TopLevelTree = React.createClass({
 		if (globalSkipNextUndo) {
 			globalSkipNextUndo = false;
 		} else if (Object.keys(globalTree.diff).length > 0) {
-			globalDiffUncommitted = true;
+			setUndoUncommitted();
 		}
 		globalTree.diff = {};
 	}
@@ -182,7 +182,7 @@ ReactTree.TreeNode = React.createClass({
 	handleChange: function(event) {
 		var html = this.refs.input.getDOMNode().textContent;
 		if (html !== this.lastHtml) {
-			globalDiffUncommitted = true;
+			setUndoUncommitted();
 			var currentNode = Tree.findFromUUID(globalTree, this.props.node.uuid);
 			currentNode.title = event.target.textContent;
 			globalTree.caretLoc = Cursor.getCaretCharacterOffsetWithin(
@@ -283,7 +283,7 @@ ReactTree.TreeNode = React.createClass({
 			renderAll();
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.UP) {
-			if (e.shiftKey && e.ctrlKey) {
+			if (e.shiftKey && (e.ctrlKey || e.metaKey)) {
 				Tree.shiftUp(globalTree);
 				renderAll();
 				e.preventDefault();
@@ -350,7 +350,7 @@ ReactTree.TreeNode = React.createClass({
 				}
 			}
 		} else if (e.keyCode === KEYS.DOWN) {
-			if (e.shiftKey && e.ctrlKey) {
+			if (e.shiftKey && (e.ctrlKey || e.metaKey)) {
 				Tree.shiftDown(globalTree);
 				renderAll();
 				e.preventDefault();
@@ -396,9 +396,10 @@ ReactTree.TreeNode = React.createClass({
 				renderAll();
 			}
 			e.preventDefault();
-		} else if (e.keyCode === KEYS.ENTER && e.ctrlKey) {
+		} else if (e.keyCode === KEYS.ENTER && (e.ctrlKey || e.metaKey)) {
 			console.log('complete current');
 			Tree.completeCurrent(globalTree);
+			setUndoUncommitted();
 			renderAll();
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.ENTER) {
@@ -408,10 +409,11 @@ ReactTree.TreeNode = React.createClass({
 			globalTree.caretLoc = caretLoc;
 			console.log('loc', caretLoc);
 			Tree.newLineAtCursor(globalTree);
+			setUndoUncommitted();
 			renderAll();
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.BACKSPACE) {
-			if (e.ctrlKey && e.shiftKey) {
+			if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
 				// Delete selected nodes - either multi-selection or current node
 				Tree.deleteSelected(globalTree);
 				renderAll();
@@ -433,29 +435,36 @@ ReactTree.TreeNode = React.createClass({
 					e.preventDefault();
 				}
 			}
+			setUndoUncommitted();
 		} else if (e.keyCode === KEYS.TAB) {
 			if (e.shiftKey) {
 				Tree.unindent(globalTree);
 			} else {
 				Tree.indent(globalTree);
 			}
-			globalDiffUncommitted = true;
+			setUndoUncommitted();
 			renderAll();
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.SPACE && e.ctrlKey) {
 			Tree.collapseCurrent(globalTree);
-			globalDiffUncommitted = true;
+			setUndoUncommitted();
 			renderAll();
 			e.preventDefault();
-		} else if (e.keyCode === KEYS.Z && (e.ctrlKey || e.metaKey)) {
-			globalTree = Tree.clone(globalUndoRing.undo());
-			renderAllNoUndo();
-			e.preventDefault();
-		} else if (e.keyCode === KEYS.Y && (e.ctrlKey || e.metaKey)) {
+		// } else if (e.keyCode === KEYS.Y && (e.ctrlKey || e.metaKey)) {
+		} else if (e.keyCode === KEYS.Z && e.metaKey && e.shiftKey) {
+			console.log('redo');
+			globalDataSaved = false;
 			globalTree = Tree.clone(globalUndoRing.redo());
 			renderAllNoUndo();
 			e.preventDefault();
-		} else if (e.keyCode === KEYS.S && e.ctrlKey) {
+		} else if (e.keyCode === KEYS.Z && (e.ctrlKey || e.metaKey)) {
+			console.log('undo');
+			commitUndoState();
+			globalDataSaved = false;
+			globalTree = Tree.clone(globalUndoRing.undo());
+			renderAllNoUndo();
+			e.preventDefault();
+		} else if (e.keyCode === KEYS.S && (e.ctrlKey || e.metaKey)) {
 			console.log('ctrl s');
 			console.log(JSON.stringify(Tree.cloneNoParentClean(globalTree), null, 4));
 			window.prompt(
@@ -463,7 +472,7 @@ ReactTree.TreeNode = React.createClass({
 				JSON.stringify(Tree.cloneNoParentClean(globalTree), null, 4)
 			);
 			e.preventDefault();
-		} else if (e.keyCode === KEYS.C && e.ctrlKey) {
+		} else if (e.keyCode === KEYS.C && (e.ctrlKey || e.metaKey)) {
 			let currentNode = Tree.findFromUUID(globalTree, this.props.node.uuid);
 			var outlines = Tree.toOutline(currentNode);
 			console.log(opml({}, [outlines]));
@@ -474,7 +483,7 @@ ReactTree.TreeNode = React.createClass({
 	},
 
 	componentDidUpdate: function() {
-		console.log('updated', this.props.node.title);
+		// console.log('updated', this.props.node.title);
 		if (this.props.node.uuid === globalTree.selected) {
 			var el = $(this.refs.input.getDOMNode());
 			globalSkipFocus = true;
@@ -660,28 +669,34 @@ ReactTree.startRender = function(parseTree) {
 		// 	globalDataSaved = true;
 		// 	renderAllNoUndo();
 		// }
-		if (globalDiffUncommitted) {
-			globalDiffUncommitted = false;
-			var newTree = Tree.clone(globalTree);
-			globalUndoRing.addPending(newTree);
-			globalUndoRing.commit();
-		}
+		commitUndoState();
 		
 		// Auto-save to localStorage
 		if (!globalDataSaved) {
 			console.log('Saving to localStorage');
 			localStorage.setItem('bearings_tree', Tree.toString(globalTree));
 			globalDataSaved = true;
-			renderAllNoUndo();
+			// renderAll();
 		}
 	}, 2000);
 };
 
-function renderAll() {
+function commitUndoState() {
 	if (globalDiffUncommitted) {
-		// TODO this needs to get set to false when running undo...
-		globalDataSaved = false;
+		console.log('committing undo state');
+		globalDiffUncommitted = false;
+		var newTree = Tree.clone(globalTree);
+		globalUndoRing.addPending(newTree);
+		globalUndoRing.commit();
 	}
+}
+
+function setUndoUncommitted() {
+	globalDiffUncommitted = true;
+	globalDataSaved = false;
+}
+
+function renderAll() {
 	doRender(globalTree);
 }
 
