@@ -19,6 +19,10 @@ This is still in active development, so I have yet to provide instructions on ho
 ### Import and Saving
 Currently, I have Parse set up to persist my data. The demo does not have this set up. Instructions coming soon. This means that the "import" link won't be useful, because the data has no where to be imported to.
 
+# Missing features
+- For multiline entries that wrap, the cursor doesn't move between lines but instead goes to the next/previous bullet
+- Text formatting (links, bold, etc) doesn't work
+- Large single pages are slow because there's no virtual scrolling. The entire page is rendered.
 
 # Installation
 ```sh
