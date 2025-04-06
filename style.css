@@ -65,6 +65,13 @@ div.editable {
     display: none;
 }
 
+.multi-selected {
+    background-color: #d4e8ff;
+    border-radius: 3px;
+    padding: 2px;
+    margin: 0px;
+}
+
 .text {
     cursor: text;
     overflow: auto;

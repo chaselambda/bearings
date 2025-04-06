@@ -16,6 +16,7 @@ var globalSkipFocus = false; // TODO remove?
 var globalCompletedHidden;
 var globalDiffUncommitted = false;
 var globalSkipNextUndo = false;
+var globalInitialSelectionUuid = null; // Track the starting point of multi-selection
 
 var DataSaved = React.createClass({
 	render: function() {
@@ -50,7 +51,7 @@ var TopLevelTree = React.createClass({
 		if (globalSkipNextUndo) {
 			globalSkipNextUndo = false;
 		} else if (Object.keys(globalTree.diff).length > 0) {
-			globalDiffUncommitted = true;
+			setUndoUncommitted();
 		}
 		globalTree.diff = {};
 	}
@@ -181,7 +182,7 @@ ReactTree.TreeNode = React.createClass({
 	handleChange: function(event) {
 		var html = this.refs.input.getDOMNode().textContent;
 		if (html !== this.lastHtml) {
-			globalDiffUncommitted = true;
+			setUndoUncommitted();
 			var currentNode = Tree.findFromUUID(globalTree, this.props.node.uuid);
 			currentNode.title = event.target.textContent;
 			globalTree.caretLoc = Cursor.getCaretCharacterOffsetWithin(
@@ -202,6 +203,13 @@ ReactTree.TreeNode = React.createClass({
 			return;
 		}
 		var currentNode = Tree.findFromUUID(globalTree, this.props.node.uuid);
+		
+		// Clear multi-selection when clicking without shift key
+		if (!event.shiftKey) {
+			Tree.clearSelection(globalTree);
+			globalInitialSelectionUuid = null;
+		}
+		
 		globalTree.selected = currentNode.uuid;
 		if (event.type === 'focus') {
 			// clicking on the div, not the actual text. Also always fired when switching focus
@@ -211,6 +219,12 @@ ReactTree.TreeNode = React.createClass({
 			globalTree.caretLoc = Cursor.getCaretCharacterOffsetWithin(
 				this.refs.input.getDOMNode()
 			);
+		}
+		
+		// If clicking with shift, add this node to the selection
+		if (event.shiftKey) {
+			Tree.addToSelection(globalTree, currentNode.uuid);
+			renderAll();
 		}
 	},
 
@@ -269,13 +283,50 @@ ReactTree.TreeNode = React.createClass({
 			renderAll();
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.UP) {
-			if (e.shiftKey && e.ctrlKey) {
+			if (e.shiftKey && (e.ctrlKey || e.metaKey)) {
 				Tree.shiftUp(globalTree);
+				renderAll();
+				e.preventDefault();
+			} else if (e.shiftKey) {
+				// Handle multi-select with shift+up
+				var selected = Tree.findSelected(globalTree);
+				var previous = Tree.findPreviousNode(selected);
+				
+				if (previous) {
+					// If this is the first shift selection, store the initial point
+					if (globalTree.selectedNodes.length === 0) {
+						globalInitialSelectionUuid = selected.uuid;
+						Tree.addToSelection(globalTree, selected.uuid);
+					}
+					
+					// Get the initial selection node (if it exists)
+					var initialNode = globalInitialSelectionUuid ? 
+						Tree.findFromUUID(globalTree, globalInitialSelectionUuid) : selected;
+					
+					// If we're moving away from initial selection point or at the initial point
+					if (!initialNode || Tree.isNodeBefore(previous, initialNode) || selected.uuid === initialNode.uuid) {
+						// Add the previous node to selection
+						Tree.addToSelection(globalTree, previous.uuid);
+					} else {
+						// We're moving toward initial selection - remove current node from selection
+						Tree.removeFromSelection(globalTree, selected.uuid);
+					}
+					
+					// Update the primary selection
+					globalTree.selected = previous.uuid;
+					
+					globalTree.caretLoc = 0;
+					renderAll();
+				}
+				e.preventDefault();
 			} else {
+				// Clear multi-selection when navigating without shift
+				Tree.clearSelection(globalTree);
+				globalInitialSelectionUuid = null;
 				Tree.selectPreviousNode(globalTree);
 				globalTree.caretLoc = 0;
+				renderAll();
 			}
-			renderAll();
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.RIGHT) {
 			if (e.ctrlKey) {
@@ -288,6 +339,8 @@ ReactTree.TreeNode = React.createClass({
 					this.refs.input.getDOMNode()
 				);
 				if (newCaretLoc === this.refs.input.getDOMNode().textContent.length) {
+					// Clear multi-selection when navigating without shift
+					Tree.clearSelection(globalTree);
 					Tree.selectNextNode(globalTree);
 					globalTree.caretLoc = 0;
 					renderAll();
@@ -297,18 +350,56 @@ ReactTree.TreeNode = React.createClass({
 				}
 			}
 		} else if (e.keyCode === KEYS.DOWN) {
-			if (e.shiftKey && e.ctrlKey) {
+			if (e.shiftKey && (e.ctrlKey || e.metaKey)) {
 				Tree.shiftDown(globalTree);
+				renderAll();
+				e.preventDefault();
+			} else if (e.shiftKey) {
+				// Handle multi-select with shift+down
+				var selected = Tree.findSelected(globalTree);
+				var next = Tree.findNextNode(selected);
+				
+				if (next) {
+					// If this is the first shift selection, store the initial point
+					if (globalTree.selectedNodes.length === 0) {
+						globalInitialSelectionUuid = selected.uuid;
+						Tree.addToSelection(globalTree, selected.uuid);
+					}
+					
+					// Get the initial selection node (if it exists)
+					var initialNode = globalInitialSelectionUuid ? 
+						Tree.findFromUUID(globalTree, globalInitialSelectionUuid) : selected;
+					
+					// If we're moving away from initial selection point or at the initial point
+					if (!initialNode || Tree.isNodeBefore(initialNode, next) || selected.uuid === initialNode.uuid) {
+						// Add the next node to selection
+						Tree.addToSelection(globalTree, next.uuid);
+					} else {
+						// We're moving toward initial selection - remove current node from selection
+						Tree.removeFromSelection(globalTree, selected.uuid);
+					}
+					
+					// Update the primary selection
+					globalTree.selected = next.uuid;
+					
+					globalTree.caretLoc = 0;
+					renderAll();
+				}
+				e.preventDefault();
 			} else {
+				// Clear multi-selection when navigating without shift
+				Tree.clearSelection(globalTree);
+				globalInitialSelectionUuid = null;
 				console.log('down');
 				Tree.selectNextNode(globalTree);
 				globalTree.caretLoc = 0;
+				renderAll();
 			}
-			renderAll();
 			e.preventDefault();
-		} else if (e.keyCode === KEYS.ENTER && e.ctrlKey) {
+		} else if (e.keyCode === KEYS.ENTER && (e.ctrlKey || e.metaKey)) {
 			console.log('complete current');
 			Tree.completeCurrent(globalTree);
+			setUndoUncommitted();
 			renderAll();
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.ENTER) {
@@ -318,12 +409,21 @@ ReactTree.TreeNode = React.createClass({
 			globalTree.caretLoc = caretLoc;
 			console.log('loc', caretLoc);
 			Tree.newLineAtCursor(globalTree);
+			setUndoUncommitted();
 			renderAll();
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.BACKSPACE) {
-			if (e.ctrlKey && e.shiftKey) {
+			if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+				// Delete selected nodes - either multi-selection or current node
 				Tree.deleteSelected(globalTree);
 				renderAll();
+				e.preventDefault();
+			} else if (globalTree.selectedNodes && globalTree.selectedNodes.length > 0) {
+				// If there are multiple selected nodes and regular backspace is pressed
+				if (confirm("Delete all selected items?")) {
+					Tree.deleteSelected(globalTree);
+					renderAll();
+				}
 				e.preventDefault();
 			} else {
 				globalTree.caretLoc = Cursor.getCaretCharacterOffsetWithin(
@@ -335,27 +435,36 @@ ReactTree.TreeNode = React.createClass({
 					e.preventDefault();
 				}
 			}
+			setUndoUncommitted();
 		} else if (e.keyCode === KEYS.TAB) {
 			if (e.shiftKey) {
 				Tree.unindent(globalTree);
 			} else {
 				Tree.indent(globalTree);
 			}
+			setUndoUncommitted();
 			renderAll();
 			e.preventDefault();
 		} else if (e.keyCode === KEYS.SPACE && e.ctrlKey) {
 			Tree.collapseCurrent(globalTree);
+			setUndoUncommitted();
 			renderAll();
 			e.preventDefault();
-		} else if (e.keyCode === KEYS.Z && (e.ctrlKey || e.metaKey)) {
-			globalTree = Tree.clone(globalUndoRing.undo());
-			renderAllNoUndo();
-			e.preventDefault();
-		} else if (e.keyCode === KEYS.Y && (e.ctrlKey || e.metaKey)) {
+		// } else if (e.keyCode === KEYS.Y && (e.ctrlKey || e.metaKey)) {
+		} else if (e.keyCode === KEYS.Z && e.metaKey && e.shiftKey) {
+			console.log('redo');
+			globalDataSaved = false;
 			globalTree = Tree.clone(globalUndoRing.redo());
 			renderAllNoUndo();
 			e.preventDefault();
-		} else if (e.keyCode === KEYS.S && e.ctrlKey) {
+		} else if (e.keyCode === KEYS.Z && (e.ctrlKey || e.metaKey)) {
+			console.log('undo');
+			commitUndoState();
+			globalDataSaved = false;
+			globalTree = Tree.clone(globalUndoRing.undo());
+			renderAllNoUndo();
+			e.preventDefault();
+		} else if (e.keyCode === KEYS.S && (e.ctrlKey || e.metaKey)) {
 			console.log('ctrl s');
 			console.log(JSON.stringify(Tree.cloneNoParentClean(globalTree), null, 4));
 			window.prompt(
@@ -363,7 +472,7 @@ ReactTree.TreeNode = React.createClass({
 				JSON.stringify(Tree.cloneNoParentClean(globalTree), null, 4)
 			);
 			e.preventDefault();
-		} else if (e.keyCode === KEYS.C && e.ctrlKey) {
+		} else if (e.keyCode === KEYS.C && (e.ctrlKey || e.metaKey)) {
 			let currentNode = Tree.findFromUUID(globalTree, this.props.node.uuid);
 			var outlines = Tree.toOutline(currentNode);
 			console.log(opml({}, [outlines]));
@@ -374,7 +483,7 @@ ReactTree.TreeNode = React.createClass({
 	},
 
 	componentDidUpdate: function() {
-		console.log('updated', this.props.node.title);
+		// console.log('updated', this.props.node.title);
 		if (this.props.node.uuid === globalTree.selected) {
 			var el = $(this.refs.input.getDOMNode());
 			globalSkipFocus = true;
@@ -434,6 +543,12 @@ ReactTree.TreeNode = React.createClass({
 
 		if (this.props.node.completed) {
 			contentClassName += ' completed';
+		}
+		
+		// Add highlighting for multi-selected nodes
+		var root = Tree.getRoot(globalTree);
+		if (root.selectedNodes && root.selectedNodes.includes(this.props.node.uuid)) {
+			contentClassName += ' multi-selected';
 		}
 
 		var plus;
@@ -554,20 +669,34 @@ ReactTree.startRender = function(parseTree) {
 		// 	globalDataSaved = true;
 		// 	renderAllNoUndo();
 		// }
-		if (globalDiffUncommitted) {
-			globalDiffUncommitted = false;
-			var newTree = Tree.clone(globalTree);
-			globalUndoRing.addPending(newTree);
-			globalUndoRing.commit();
+		commitUndoState();
+		
+		// Auto-save to localStorage
+		if (!globalDataSaved) {
+			console.log('Saving to localStorage');
+			localStorage.setItem('bearings_tree', Tree.toString(globalTree));
+			globalDataSaved = true;
+			// renderAll();
 		}
 	}, 2000);
 };
 
+function commitUndoState() {
+	if (globalDiffUncommitted) {
+		console.log('committing undo state');
+		globalDiffUncommitted = false;
+		var newTree = Tree.clone(globalTree);
+		globalUndoRing.addPending(newTree);
+		globalUndoRing.commit();
+	}
+}
+
+function setUndoUncommitted() {
+	globalDiffUncommitted = true;
+	globalDataSaved = false;
+}
+
 function renderAll() {
-	// if (globalDiffUncommitted) {
-	// 	// TODO this needs to get set to false when running undo...
-	// 	globalDataSaved = false;
-	// }
 	doRender(globalTree);
 }
 

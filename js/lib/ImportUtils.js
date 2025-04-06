@@ -6,7 +6,8 @@ var opmlToJSON = require('opml-to-json');
 var multiline = require('multiline');
 var _ = require('underscore');
 
-var workflowyToWorkclone = function(tree) {
+// Export this function so it can be used by import.js
+ImportUtils.workflowyToWorkclone = function(tree) {
 	var ret = workflowyToWorkcloneRec(tree);
 	ret.childNodes[0].selected = true;
 	return ret.childNodes;
@@ -30,7 +31,7 @@ var workflowyToWorkcloneRec = function(tree) {
 
 ImportUtils.opmlToTree = function(opml, cb) {
 	opmlToJSON(opml, function(error, json) {
-		cb(Tree.makeTree(workflowyToWorkclone(json)));
+		cb(Tree.makeTree(ImportUtils.workflowyToWorkclone(json)));
 	});
 };
 
