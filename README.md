@@ -1,3 +1,5 @@
+Most up to branch shown here: https://github.com/chaselambda/bearings/pull/3
+
 # Bearings
 A workflowy clone.
 
